@@ -1,11 +1,38 @@
-<div align="center">
+# LedgerFlow — Expense Tracker
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+A minimalist, responsive personal finance and expense tracking web application built strictly with **HTML5**, **CSS3**, and **Vanilla JavaScript** (ES Modules), using **Chart.js** and **Lucide Icons** via CDN and browser `localStorage` for persistence.
 
-  <h1>Built with AI Studio</h2>
+## Folder Structure
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+```text
+├── index.html          # Semantic HTML5 shell and modal dialogs
+├── css/
+│   └── style.css       # Minimalist CSS3 design system & responsive layouts
+├── js/
+│   ├── app.js          # Application orchestrator, routing, modals, and events
+│   ├── storage.js      # Centralized LocalStorage repository (API-ready)
+│   ├── transactions.js # Pure calculations, validation, CSV export, history UI
+│   ├── dashboard.js    # Dashboard KPIs, spending overview & category charts
+│   ├── analytics.js    # 6-month cash flow, savings rate, and top categories
+│   └── budget.js       # Monthly budget limit, 80% warning & >100% alert logic
+└── assets/
+    └── favicon.svg     # Vector application icon
+```
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## Running Locally
 
-</div>
+Because the JavaScript files use native ES Modules (`<script type="module">`), serve the directory over any local HTTP server:
+
+1. **Using Vite (included in environment):**
+   ```bash
+   npm install
+   npm run dev
+   ```
+   Open `http://localhost:3000`.
+
+2. **Using Python or Node static server (zero dependencies):**
+   ```bash
+   python3 -m http.server 8080
+   # or: npx serve .
+   ```
+   Open `http://localhost:8080`.
