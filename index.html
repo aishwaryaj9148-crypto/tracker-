@@ -78,6 +78,10 @@
             <i data-lucide="wallet" aria-hidden="true"></i>
             <span>Budget</span>
           </button>
+          <button type="button" class="nav-item" data-view="savings">
+            <i data-lucide="target" aria-hidden="true"></i>
+            <span>Savings Goals</span>
+          </button>
         </nav>
 
         <div class="sidebar-footer">
@@ -135,6 +139,20 @@
 
         <!-- Main Content Viewport -->
         <main class="main-content" id="main-content">
+          <!-- Backend Connection Error Banner -->
+          <div id="backend-status-banner" class="alert-banner is-exceeded hidden" role="alert">
+            <div class="alert-banner-content">
+              <i data-lucide="alert-octagon" aria-hidden="true"></i>
+              <span id="backend-status-message">Could not connect to the backend server. Make sure the Node.js server is running.</span>
+            </div>
+          </div>
+
+          <!-- Application Loading State -->
+          <div id="app-loading-state" class="empty-state hidden" role="status">
+            <p class="empty-title">Loading LedgerFlow...</p>
+            <p class="empty-desc">Fetching financial data from backend database...</p>
+          </div>
+
           <!-- VIEW 1: DASHBOARD -->
           <section id="view-dashboard" class="view-section is-active" aria-labelledby="page-title">
             <!-- Budget Alert Banner (shown dynamically at >=80% or >100%) -->
@@ -584,6 +602,79 @@
               </div>
             </article>
           </section>
+
+          <!-- VIEW 5: SAVINGS GOAL TRACKER -->
+          <section id="view-savings" class="view-section" aria-label="Savings Goals">
+            <div class="analytics-header-bar">
+              <div>
+                <h2 class="section-heading">Savings Goal Tracker</h2>
+                <p class="section-subheading">Set targets, monitor progress, and grow your wealth</p>
+              </div>
+              <button type="button" id="open-add-goal-btn" class="btn btn-primary">
+                <i data-lucide="plus" aria-hidden="true"></i>
+                <span>New Savings Goal</span>
+              </button>
+            </div>
+
+            <!-- Savings KPI Cards -->
+            <div class="kpi-grid">
+              <article class="card kpi-card">
+                <div class="kpi-header">
+                  <span class="kpi-label">Active Goals</span>
+                  <span class="kpi-icon kpi-icon-neutral" aria-hidden="true">
+                    <i data-lucide="target"></i>
+                  </span>
+                </div>
+                <p class="kpi-value tabular-nums" id="savings-kpi-total-goals">0</p>
+                <p class="kpi-meta" id="savings-kpi-goals-meta">0 active goals</p>
+              </article>
+
+              <article class="card kpi-card">
+                <div class="kpi-header">
+                  <span class="kpi-label">Total Target</span>
+                  <span class="kpi-icon kpi-icon-accent" aria-hidden="true">
+                    <i data-lucide="flag"></i>
+                  </span>
+                </div>
+                <p class="kpi-value tabular-nums" id="savings-kpi-total-target">$0.00</p>
+                <p class="kpi-meta">Combined goal targets</p>
+              </article>
+
+              <article class="card kpi-card">
+                <div class="kpi-header">
+                  <span class="kpi-label">Total Saved</span>
+                  <span class="kpi-icon kpi-icon-income" aria-hidden="true">
+                    <i data-lucide="piggy-bank"></i>
+                  </span>
+                </div>
+                <p class="kpi-value tabular-nums text-income" id="savings-kpi-total-saved">$0.00</p>
+                <p class="kpi-meta">Funds deposited</p>
+              </article>
+
+              <article class="card kpi-card">
+                <div class="kpi-header">
+                  <span class="kpi-label">Remaining to Save</span>
+                  <span class="kpi-icon kpi-icon-neutral" aria-hidden="true">
+                    <i data-lucide="coins"></i>
+                  </span>
+                </div>
+                <p class="kpi-value tabular-nums" id="savings-kpi-total-remaining">$0.00</p>
+                <p class="kpi-meta" id="savings-kpi-progress-meta">0% overall progress</p>
+              </article>
+            </div>
+
+            <!-- Goals Grid & Empty State -->
+            <div id="savings-goals-grid" class="goals-grid"></div>
+
+            <div id="savings-goals-empty" class="empty-state hidden">
+              <p class="empty-title">No savings goals yet</p>
+              <p class="empty-desc">Create your first goal to begin monitoring your savings progress.</p>
+              <button type="button" class="btn btn-primary btn-sm" id="empty-add-goal-btn">
+                <i data-lucide="plus" aria-hidden="true"></i>
+                <span>Create First Goal</span>
+              </button>
+            </div>
+          </section>
         </main>
       </div>
     </div>
@@ -676,6 +767,132 @@
           <div class="modal-footer">
             <button type="button" id="cancel-tx-modal-btn" class="btn btn-secondary">Cancel</button>
             <button type="submit" id="save-tx-btn" class="btn btn-primary">Save Transaction</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Add / Edit Savings Goal Modal -->
+    <div id="savings-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="savings-modal-title">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <h2 id="savings-modal-title" class="modal-title">New Savings Goal</h2>
+          <button type="button" id="close-savings-modal-btn" class="icon-btn" aria-label="Close modal">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+
+        <form id="savings-form" class="stacked-form" novalidate>
+          <input type="hidden" id="savings-id-input" />
+
+          <div class="form-group">
+            <label for="savings-name-input" class="form-label">Goal Name</label>
+            <input
+              type="text"
+              id="savings-name-input"
+              name="goal_name"
+              class="form-input"
+              placeholder="e.g. Emergency Fund, New Laptop, Vacation"
+              maxlength="80"
+              required
+            />
+            <span class="form-error" id="savings-name-error"></span>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="savings-target-input" class="form-label">Target Amount ($)</label>
+              <input
+                type="number"
+                id="savings-target-input"
+                name="target_amount"
+                class="form-input tabular-nums"
+                step="0.01"
+                min="0.01"
+                placeholder="e.g. 2500.00"
+                required
+              />
+              <span class="form-error" id="savings-target-error"></span>
+            </div>
+
+            <div class="form-group">
+              <label for="savings-current-input" class="form-label">Currently Saved ($)</label>
+              <input
+                type="number"
+                id="savings-current-input"
+                name="current_amount"
+                class="form-input tabular-nums"
+                step="0.01"
+                min="0"
+                placeholder="0.00"
+              />
+              <span class="form-error" id="savings-current-error"></span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label for="savings-date-input" class="form-label">Target Date (Optional)</label>
+            <input
+              type="date"
+              id="savings-date-input"
+              name="target_date"
+              class="form-input tabular-nums"
+            />
+            <span class="form-error" id="savings-date-error"></span>
+          </div>
+
+          <div class="form-group">
+            <label for="savings-desc-input" class="form-label">Description (Optional)</label>
+            <textarea
+              id="savings-desc-input"
+              name="description"
+              class="form-input form-textarea"
+              rows="2"
+              maxlength="240"
+              placeholder="Notes, purpose, or milestone reminders..."
+            ></textarea>
+            <span class="form-error" id="savings-desc-error"></span>
+          </div>
+
+          <div class="modal-footer">
+            <button type="button" id="cancel-savings-modal-btn" class="btn btn-secondary">Cancel</button>
+            <button type="submit" id="save-savings-btn" class="btn btn-primary">Save Goal</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Quick Add Money Modal -->
+    <div id="add-money-modal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="add-money-modal-title">
+      <div class="modal-dialog modal-dialog-sm">
+        <div class="modal-header">
+          <h2 id="add-money-modal-title" class="modal-title">Add Money to Goal</h2>
+          <button type="button" id="close-add-money-modal-btn" class="icon-btn" aria-label="Close dialog">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+
+        <form id="add-money-form" class="stacked-form" novalidate>
+          <input type="hidden" id="add-money-id-input" />
+          <p class="modal-body-text" id="add-money-goal-name">Deposit funds toward your goal.</p>
+
+          <div class="form-group">
+            <label for="deposit-amount-input" class="form-label">Amount to Add ($)</label>
+            <input
+              type="number"
+              id="deposit-amount-input"
+              class="form-input tabular-nums"
+              step="0.01"
+              min="0.01"
+              placeholder="e.g. 100.00"
+              required
+            />
+            <span class="form-error" id="deposit-amount-error"></span>
+          </div>
+
+          <div class="modal-footer">
+            <button type="button" id="cancel-add-money-btn" class="btn btn-secondary">Cancel</button>
+            <button type="submit" id="confirm-add-money-btn" class="btn btn-primary">Deposit Funds</button>
           </div>
         </form>
       </div>

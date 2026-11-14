@@ -6,13 +6,18 @@
  */
 
 import {
+  addSavingsGoal,
   addTransaction,
+  deleteSavingsGoal,
   deleteTransaction,
   getBudget,
+  getSavingsGoals,
   getTransactions,
   initializeStorage,
+  loadBudgetForMonth,
   resetToSampleData,
   saveBudget,
+  updateSavingsGoal,
   updateTransaction,
 } from './storage.js';
 import {
@@ -31,12 +36,14 @@ import {
 import { renderDashboardView } from './dashboard.js';
 import { renderAnalyticsView } from './analytics.js';
 import { renderBudgetView, validateBudgetLimit } from './budget.js';
+import { renderSavingsView, validateSavingsGoalInput } from './savings.js';
 
 const VIEW_TITLES = {
   dashboard: 'Dashboard',
   transactions: 'Transactions',
   analytics: 'Analytics',
   budget: 'Budget Management',
+  savings: 'Savings Goals',
 };
 
 const state = {
@@ -50,6 +57,7 @@ const state = {
     sortBy: 'date-desc',
   },
   pendingDeleteId: null,
+  pendingDeleteType: 'transaction',
 };
 
 function refreshIcons() {
@@ -68,6 +76,32 @@ function showToast(message, isError = false) {
   window.setTimeout(() => {
     toast.remove();
   }, 3200);
+}
+
+function showLoadingState() {
+  document.getElementById('app-loading-state')?.classList.remove('hidden');
+}
+
+function hideLoadingState() {
+  document.getElementById('app-loading-state')?.classList.add('hidden');
+}
+
+function showBackendError(message) {
+  const banner = document.getElementById('backend-status-banner');
+  const msgEl = document.getElementById('backend-status-message');
+  if (banner && msgEl) {
+    msgEl.textContent = message;
+    banner.classList.remove('hidden');
+  }
+  showToast(message, true);
+  refreshIcons();
+}
+
+function hideBackendError() {
+  const banner = document.getElementById('backend-status-banner');
+  if (banner) {
+    banner.classList.add('hidden');
+  }
 }
 
 /**
@@ -95,7 +129,7 @@ function syncMonthSelector(transactions) {
  */
 function renderApp() {
   const transactions = getTransactions();
-  const budget = getBudget();
+  const budget = getBudget(state.selectedMonth);
 
   syncMonthSelector(transactions);
 
@@ -130,6 +164,13 @@ function renderApp() {
       transactions,
       budget,
       selectedMonth: state.selectedMonth,
+    });
+  } else if (state.activeView === 'savings') {
+    renderSavingsView({
+      goals: getSavingsGoals(),
+      onAddMoney: openAddMoneyModal,
+      onEdit: openEditSavingsModal,
+      onDelete: openDeleteSavingsModal,
     });
   }
 
@@ -251,7 +292,7 @@ function closeTransactionModal() {
   document.getElementById('tx-modal').classList.add('hidden');
 }
 
-function handleTransactionSubmit(event) {
+async function handleTransactionSubmit(event) {
   event.preventDefault();
   clearTransactionFormErrors();
 
@@ -281,22 +322,27 @@ function handleTransactionSubmit(event) {
     return;
   }
 
-  if (id) {
-    updateTransaction(id, payload);
-    showToast('Transaction updated.');
-  } else {
-    addTransaction(payload);
-    showToast(`${payload.type === 'income' ? 'Income' : 'Expense'} added.`);
-  }
+  try {
+    if (id) {
+      await updateTransaction(id, payload);
+      showToast('Transaction updated.');
+    } else {
+      await addTransaction(payload);
+      showToast(`${payload.type === 'income' ? 'Income' : 'Expense'} added.`);
+    }
 
-  // If the new transaction is in a different month and user isn't viewing All Time, switch to its month so they see it immediately
-  const txMonth = payload.date.slice(0, 7);
-  if (state.selectedMonth !== 'all' && txMonth !== state.selectedMonth) {
-    state.selectedMonth = txMonth;
-  }
+    // If the new transaction is in a different month and user isn't viewing All Time, switch to its month so they see it immediately
+    const txMonth = payload.date.slice(0, 7);
+    if (state.selectedMonth !== 'all' && txMonth !== state.selectedMonth) {
+      state.selectedMonth = txMonth;
+      await loadBudgetForMonth(state.selectedMonth);
+    }
 
-  closeTransactionModal();
-  renderApp();
+    closeTransactionModal();
+    renderApp();
+  } catch (err) {
+    showToast(err.message || 'Failed to save transaction', true);
+  }
 }
 
 function openDeleteModal(id) {
@@ -304,26 +350,194 @@ function openDeleteModal(id) {
   if (!tx) return;
 
   state.pendingDeleteId = id;
+  state.pendingDeleteType = 'transaction';
+  document.getElementById('delete-modal-title').textContent = 'Delete Transaction';
   document.getElementById('delete-modal-message').textContent = `Delete "${tx.title}"? This action cannot be undone.`;
+  document.getElementById('delete-modal').classList.remove('hidden');
+}
+
+function openDeleteSavingsModal(id) {
+  const goal = getSavingsGoals().find((g) => g.id === id);
+  if (!goal) return;
+
+  state.pendingDeleteId = id;
+  state.pendingDeleteType = 'savings';
+  document.getElementById('delete-modal-title').textContent = 'Delete Savings Goal';
+  document.getElementById('delete-modal-message').textContent = `Delete savings goal "${goal.goal_name}"? This action cannot be undone.`;
   document.getElementById('delete-modal').classList.remove('hidden');
 }
 
 function closeDeleteModal() {
   state.pendingDeleteId = null;
+  state.pendingDeleteType = 'transaction';
   document.getElementById('delete-modal').classList.add('hidden');
 }
 
-function handleConfirmDelete() {
+async function handleConfirmDelete() {
   if (!state.pendingDeleteId) return;
-  const deleted = deleteTransaction(state.pendingDeleteId);
-  closeDeleteModal();
-  if (deleted) {
-    showToast('Transaction deleted.');
+  try {
+    if (state.pendingDeleteType === 'savings') {
+      await deleteSavingsGoal(state.pendingDeleteId);
+      showToast('Savings goal deleted.');
+    } else {
+      await deleteTransaction(state.pendingDeleteId);
+      showToast('Transaction deleted.');
+    }
+    closeDeleteModal();
     renderApp();
+  } catch (err) {
+    showToast(err.message || 'Failed to delete record', true);
   }
 }
 
-function handleBudgetSubmit(event) {
+function clearSavingsFormErrors() {
+  ['name', 'target', 'current', 'date'].forEach((field) => {
+    const input = document.getElementById(`savings-${field}-input`);
+    const err = document.getElementById(`savings-${field}-error`);
+    if (input) input.classList.remove('is-invalid');
+    if (err) err.textContent = '';
+  });
+}
+
+function openAddSavingsModal() {
+  clearSavingsFormErrors();
+  document.getElementById('savings-modal-title').textContent = 'New Savings Goal';
+  document.getElementById('save-savings-btn').textContent = 'Save Goal';
+  document.getElementById('savings-id-input').value = '';
+
+  const form = document.getElementById('savings-form');
+  form.reset();
+
+  document.getElementById('savings-modal').classList.remove('hidden');
+  document.getElementById('savings-name-input').focus();
+}
+
+function openEditSavingsModal(id) {
+  const goal = getSavingsGoals().find((g) => g.id === id);
+  if (!goal) {
+    showToast('Savings goal could not be found.', true);
+    return;
+  }
+
+  clearSavingsFormErrors();
+  document.getElementById('savings-modal-title').textContent = 'Edit Savings Goal';
+  document.getElementById('save-savings-btn').textContent = 'Update Goal';
+  document.getElementById('savings-id-input').value = goal.id;
+
+  document.getElementById('savings-name-input').value = goal.goal_name;
+  document.getElementById('savings-target-input').value = goal.target_amount.toFixed(2);
+  document.getElementById('savings-current-input').value = goal.current_amount.toFixed(2);
+  document.getElementById('savings-date-input').value = goal.target_date || '';
+  document.getElementById('savings-desc-input').value = goal.description || '';
+
+  document.getElementById('savings-modal').classList.remove('hidden');
+  document.getElementById('savings-name-input').focus();
+}
+
+function closeSavingsModal() {
+  document.getElementById('savings-modal').classList.add('hidden');
+}
+
+async function handleSavingsSubmit(event) {
+  event.preventDefault();
+  clearSavingsFormErrors();
+
+  const id = document.getElementById('savings-id-input').value.trim();
+  const payload = {
+    goal_name: document.getElementById('savings-name-input').value.trim(),
+    target_amount: document.getElementById('savings-target-input').value,
+    current_amount: document.getElementById('savings-current-input').value,
+    target_date: document.getElementById('savings-date-input').value,
+    description: document.getElementById('savings-desc-input').value.trim(),
+  };
+
+  const validation = validateSavingsGoalInput(payload);
+  if (!validation.valid) {
+    const fieldMap = {
+      goal_name: 'name',
+      target_amount: 'target',
+      current_amount: 'current',
+      target_date: 'date',
+    };
+    Object.entries(validation.errors).forEach(([field, msg]) => {
+      const idKey = fieldMap[field] || field;
+      const inputEl = document.getElementById(`savings-${idKey}-input`);
+      const errorEl = document.getElementById(`savings-${idKey}-error`);
+      if (inputEl) inputEl.classList.add('is-invalid');
+      if (errorEl) errorEl.textContent = msg;
+    });
+    const firstInvalidKey = fieldMap[Object.keys(validation.errors)[0]];
+    document.getElementById(`savings-${firstInvalidKey}-input`)?.focus();
+    return;
+  }
+
+  try {
+    if (id) {
+      await updateSavingsGoal(id, payload);
+      showToast('Savings goal updated.');
+    } else {
+      await addSavingsGoal(payload);
+      showToast('New savings goal created.');
+    }
+    closeSavingsModal();
+    renderApp();
+  } catch (err) {
+    showToast(err.message || 'Failed to save savings goal', true);
+  }
+}
+
+function openAddMoneyModal(id) {
+  const goal = getSavingsGoals().find((g) => g.id === id);
+  if (!goal) return;
+
+  document.getElementById('add-money-id-input').value = goal.id;
+  document.getElementById('add-money-goal-name').textContent =
+    `Deposit funds toward "${goal.goal_name}" (Target: ${formatCurrency(goal.target_amount)}, Saved so far: ${formatCurrency(goal.current_amount)})`;
+  const inputEl = document.getElementById('deposit-amount-input');
+  const errEl = document.getElementById('deposit-amount-error');
+  inputEl.value = '';
+  inputEl.classList.remove('is-invalid');
+  errEl.textContent = '';
+
+  document.getElementById('add-money-modal').classList.remove('hidden');
+  inputEl.focus();
+}
+
+function closeAddMoneyModal() {
+  document.getElementById('add-money-modal').classList.add('hidden');
+}
+
+async function handleAddMoneySubmit(event) {
+  event.preventDefault();
+  const id = document.getElementById('add-money-id-input').value.trim();
+  const inputEl = document.getElementById('deposit-amount-input');
+  const errEl = document.getElementById('deposit-amount-error');
+  inputEl.classList.remove('is-invalid');
+  errEl.textContent = '';
+
+  const addVal = Number(inputEl.value);
+  if (!Number.isFinite(addVal) || addVal <= 0) {
+    inputEl.classList.add('is-invalid');
+    errEl.textContent = 'Please enter an amount greater than zero.';
+    inputEl.focus();
+    return;
+  }
+
+  const goal = getSavingsGoals().find((g) => g.id === id);
+  if (!goal) return;
+
+  try {
+    const newCurrent = Number((goal.current_amount + addVal).toFixed(2));
+    await updateSavingsGoal(id, { current_amount: newCurrent });
+    showToast(`Added ${formatCurrency(addVal)} to "${goal.goal_name}".`);
+    closeAddMoneyModal();
+    renderApp();
+  } catch (err) {
+    showToast(err.message || 'Failed to add funds', true);
+  }
+}
+
+async function handleBudgetSubmit(event) {
   event.preventDefault();
   const inputEl = document.getElementById('budget-limit-input');
   const errorEl = document.getElementById('budget-limit-error');
@@ -338,9 +552,15 @@ function handleBudgetSubmit(event) {
     return;
   }
 
-  saveBudget(Number(inputEl.value));
-  showToast('Monthly budget updated.');
-  renderApp();
+  try {
+    const effectiveMonth = state.selectedMonth === 'all' ? getCurrentMonthKey() : state.selectedMonth;
+    const [year, month] = effectiveMonth.split('-').map(Number);
+    await saveBudget(Number(inputEl.value), year, month);
+    showToast('Monthly budget updated.');
+    renderApp();
+  } catch (err) {
+    showToast(err.message || 'Failed to save budget', true);
+  }
 }
 
 function bindEvents() {
@@ -367,8 +587,15 @@ function bindEvents() {
   });
 
   // Global Month Selector
-  document.getElementById('global-month-select').addEventListener('change', (e) => {
+  document.getElementById('global-month-select').addEventListener('change', async (e) => {
     state.selectedMonth = e.target.value;
+    if (state.selectedMonth !== 'all') {
+      try {
+        await loadBudgetForMonth(state.selectedMonth);
+      } catch (err) {
+        console.warn('Could not load budget for month:', err);
+      }
+    }
     renderApp();
   });
 
@@ -456,6 +683,24 @@ function bindEvents() {
   // Budget Form
   document.getElementById('budget-form').addEventListener('submit', handleBudgetSubmit);
 
+  // Savings Goal Triggers & Controls
+  document.getElementById('open-add-goal-btn')?.addEventListener('click', openAddSavingsModal);
+  document.getElementById('empty-add-goal-btn')?.addEventListener('click', openAddSavingsModal);
+  document.getElementById('close-savings-modal-btn')?.addEventListener('click', closeSavingsModal);
+  document.getElementById('cancel-savings-modal-btn')?.addEventListener('click', closeSavingsModal);
+  document.getElementById('savings-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'savings-modal') closeSavingsModal();
+  });
+  document.getElementById('savings-form')?.addEventListener('submit', handleSavingsSubmit);
+
+  // Add Money Modal Controls
+  document.getElementById('close-add-money-modal-btn')?.addEventListener('click', closeAddMoneyModal);
+  document.getElementById('cancel-add-money-btn')?.addEventListener('click', closeAddMoneyModal);
+  document.getElementById('add-money-modal')?.addEventListener('click', (e) => {
+    if (e.target.id === 'add-money-modal') closeAddMoneyModal();
+  });
+  document.getElementById('add-money-form')?.addEventListener('submit', handleAddMoneySubmit);
+
   // Sidebar Utilities: CSV Export & Sample Data Reset
   document.getElementById('export-csv-btn').addEventListener('click', () => {
     const transactions = getTransactions();
@@ -467,27 +712,48 @@ function bindEvents() {
     showToast('Transactions exported to CSV.');
   });
 
-  document.getElementById('reset-sample-btn').addEventListener('click', () => {
-    resetToSampleData();
-    state.selectedMonth = getCurrentMonthKey();
-    showToast('Sample dataset restored.');
-    renderApp();
+  document.getElementById('reset-sample-btn').addEventListener('click', async () => {
+    try {
+      showLoadingState();
+      await resetToSampleData();
+      state.selectedMonth = getCurrentMonthKey();
+      showToast('Sample dataset restored in database.');
+      renderApp();
+    } catch (err) {
+      showToast(err.message || 'Failed to reset sample data', true);
+    } finally {
+      hideLoadingState();
+    }
   });
 
   // Global Escape key closes modals / mobile drawer
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
       closeTransactionModal();
+      closeSavingsModal();
+      closeAddMoneyModal();
       closeDeleteModal();
       closeMobileSidebar();
     }
   });
 }
 
-function bootstrap() {
-  initializeStorage();
+async function bootstrap() {
   bindEvents();
-  renderApp();
+  showLoadingState();
+  try {
+    const { importedCount } = await initializeStorage(state.selectedMonth);
+    hideBackendError();
+    if (importedCount > 0) {
+      showToast(`Imported ${importedCount} records from LocalStorage into database.`);
+    }
+    renderApp();
+  } catch (err) {
+    console.error('Failed to initialize application from backend:', err);
+    showBackendError('Unable to connect to the backend server. Please verify the backend is running at http://localhost:3000.');
+  } finally {
+    hideLoadingState();
+  }
 }
 
 if (document.readyState === 'loading') {
